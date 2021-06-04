@@ -1,0 +1,295 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Backup Plan template to back up all resources tagged with backup=daily daily at  1 pm IST.
+Parameters:
+  EndpointDetails:
+    Description: Email Id's for reveining notification
+    Type: String
+  Cronjob:  
+    Type: String
+    
+Resources:
+  KMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: "Encryption key for daily"
+      EnableKeyRotation: True
+      Enabled: True
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              "AWS": { "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:root" }
+            Action:
+              - kms:*
+            Resource: "*"
+
+  BackupVaultWithDailyBackups:
+    Type: "AWS::Backup::BackupVault"
+    Properties:
+      BackupVaultName: !Sub BackupPlanforDynamodb-${Environment}
+      EncryptionKeyArn: !GetAtt KMSKey.Arn
+      Notifications: 
+        BackupVaultEvents: 
+         - BACKUP_JOB_FAILED
+        SNSTopicArn: !Ref BackupNotification
+
+  BackupPlanWithDailyBackups:
+    Type: "AWS::Backup::BackupPlan"
+    Properties:
+      BackupPlan:
+        BackupPlanName:  "BackupPlanforDynamodb"
+        BackupPlanRule:
+          -
+            RuleName: "RuleForDailyBackups"
+            TargetBackupVault: !Ref BackupVaultWithDailyBackups
+            ScheduleExpression: !Ref Cronjob
+            StartWindowMinutes: 60
+            Lifecycle:
+              DeleteAfterDays: 2
+              
+    DependsOn: BackupVaultWithDailyBackups
+  
+  
+  BackupRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "backup.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      
+    
+  BackUpPolicy:
+    Type: AWS::IAM::Policy
+    Properties: 
+      PolicyDocument: 
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: 'backup:*'
+            Resource: '*'
+          - Effect: Allow
+            Action: 'backup-storage:*'
+            Resource: '*'
+          - Action:
+              - 'rds:DescribeDBSnapshots'
+              - 'rds:ListTagsForResource'
+              - 'rds:DescribeDBInstances'
+              - 'rds:describeDBEngineVersions'
+              - 'rds:describeOptionGroups'
+              - 'rds:describeOrderableDBInstanceOptions'
+              - 'rds:describeDBSubnetGroups'
+              - 'rds:describeDBClusterSnapshots'
+              - 'rds:describeDBClusters'
+              - 'rds:describeDBParameterGroups'
+              - 'rds:DescribeDBClusterParameterGroups'
+              - 'rds:DescribeDBInstanceAutomatedBackups'
+            Effect: Allow
+            Resource: '*'
+          - Action:
+              - 'rds:DeleteDBSnapshot'
+              - 'rds:DeleteDBClusterSnapshot'
+            Effect: Allow
+            Resource: '*'
+            Condition:
+              'ForAnyValue:StringEquals':
+                'aws:CalledVia':
+                  - backup.amazonaws.com
+          - Action:
+              - 'dynamodb:ListBackups'
+              - 'dynamodb:ListTables'
+              - 'dynamodb:CreateBackup'
+              - 'dynamodb:DescribeBackup'
+              - 'dynamodb:RestoreTableFromBackup'
+              - 'dynamodb:PutItem'
+              - 'dynamodb:UpdateItem'
+              - 'dynamodb:DeleteItem'
+              - 'dynamodb:GetItem'
+              - 'dynamodb:Query'
+              - 'dynamodb:Scan'
+              - 'dynamodb:BatchWriteItem'
+            Effect: Allow
+            Resource: '*'
+          - Action:
+              - 'dynamodb:DeleteBackup'
+            Effect: Allow
+            Resource: '*'
+            Condition:
+              'ForAnyValue:StringEquals':
+                'aws:CalledVia':
+                  - backup.amazonaws.com
+          - Action:
+              - 'elasticfilesystem:DescribeFilesystems'
+            Resource: 'arn:aws:elasticfilesystem:*:*:file-system/*'
+            Effect: Allow
+          - Action:
+              - 'ec2:DescribeSnapshots'
+              - 'ec2:DescribeVolumes'
+              - 'ec2:describeAvailabilityZones'
+              - 'ec2:DescribeVpcs'
+              - 'ec2:DescribeAccountAttributes'
+              - 'ec2:DescribeSecurityGroups'
+              - 'ec2:DescribeImages'
+              - 'ec2:DescribeSubnets'
+              - 'ec2:DescribePlacementGroups'
+              - 'ec2:DescribeInstances'
+              - 'ec2:DescribeInstanceTypes'
+            Effect: Allow
+            Resource: '*'
+          - Action:
+              - 'ec2:DeleteSnapshot'
+              - 'ec2:DeregisterImage'
+            Effect: Allow
+            Resource: '*'
+            Condition:
+              'ForAnyValue:StringEquals':
+                'aws:CalledVia':
+                  - backup.amazonaws.com
+          - Action:
+              - 'tag:GetTagKeys'
+              - 'tag:GetTagValues'
+              - 'tag:GetResources'
+            Effect: Allow
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - 'storagegateway:DescribeCachediSCSIVolumes'
+              - 'storagegateway:DescribeStorediSCSIVolumes'
+            Resource: 'arn:aws:storagegateway:*:*:gateway/*/volume/*'
+          - Effect: Allow
+            Action:
+              - 'storagegateway:ListGateways'
+            Resource: 'arn:aws:storagegateway:*:*:*'
+          - Effect: Allow
+            Action:
+              - 'storagegateway:DescribeGatewayInformation'
+              - 'storagegateway:ListVolumes'
+              - 'storagegateway:ListLocalDisks'
+            Resource: 'arn:aws:storagegateway:*:*:gateway/*'
+          - Action:
+              - 'iam:ListRoles'
+              - 'iam:GetRole'
+            Effect: Allow
+            Resource: '*'
+          - Effect: Allow
+            Action: 'iam:PassRole'
+            Resource:
+              - 'arn:aws:iam::*:role/*AwsBackup*'
+              - 'arn:aws:iam::*:role/*AWSBackup*'
+            Condition:
+              StringLike:
+                'iam:PassedToService': backup.amazonaws.com
+          - Effect: Allow
+            Action: 'organizations:DescribeOrganization'
+            Resource: '*'
+          - Action:
+              - 'kms:ListKeys'
+              - 'kms:DescribeKey'
+              - 'kms:GenerateDataKey'
+              - 'kms:ListAliases'
+            Effect: Allow
+            Resource: '*'
+          - Action:
+              - 'kms:CreateGrant'
+            Effect: Allow
+            Resource: '*'
+            Condition:
+              'ForAnyValue:StringEquals':
+                'kms:EncryptionContextKeys': 'aws:backup:backup-vault'
+              Bool:
+                'kms:GrantIsForAWSResource': true
+              StringLike:
+                'kms:ViaService': backup.*.amazonaws.com
+          - Effect: Allow
+            Action:
+              - 'ssm:CancelCommand'
+              - 'ssm:GetCommandInvocation'
+            Resource: '*'
+          - Effect: Allow
+            Action: 'ssm:SendCommand'
+            Resource:
+              - 'arn:aws:ssm:*:*:document/AWSEC2-CreateVssSnapshot'
+              - 'arn:aws:ec2:*:*:instance/*'
+          - Action: 'fsx:DescribeFileSystems'
+            Effect: Allow
+            Resource: '*'
+          - Action: 'fsx:DescribeBackups'
+            Effect: Allow
+            Resource: '*'
+          - Action: 'fsx:DeleteBackup'
+            Effect: Allow
+            Resource: 'arn:aws:fsx:*:*:backup/*'
+            Condition:
+              'ForAnyValue:StringEquals':
+                'aws:CalledVia':
+                  - backup.amazonaws.com
+          - Action: 'ds:DescribeDirectories'
+            Effect: Allow
+            Resource: '*'
+
+      PolicyName: AWSBackupManagedFulllAcessPolicy
+      Roles: 
+        - !Ref BackupRole 
+  TagBasedBackupSelection:
+    Type: "AWS::Backup::BackupSelection"
+    Properties:
+      BackupSelection:
+        SelectionName: "TagBasedBackupSelection"
+        IamRoleArn: !GetAtt BackupRole.Arn
+        ListOfTags:
+          - ConditionType: "STRINGEQUALS"
+            ConditionKey: "backup"
+            ConditionValue: "daily"  
+      BackupPlanId: !Ref BackupPlanWithDailyBackups
+    DependsOn: BackupPlanWithDailyBackups 
+
+  BackupNotification:
+    Type: AWS::SNS::Topic
+    Properties: 
+      DisplayName: BackupNotification
+      Subscription: 
+        - Endpoint: !Ref EndpointDetails
+          Protocol: email
+      TopicName: BackupNotifiaction
+
+  BackupSNSPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties: 
+      PolicyDocument: 
+        Version: 2008-10-17
+        Id: __default_policy_ID
+        Statement:
+          - Sid: __default_statement_ID
+            Effect: Allow
+            Principal:
+              AWS: '*'
+            Action:
+              - 'SNS:GetTopicAttributes'
+              - 'SNS:SetTopicAttributes'
+              - 'SNS:AddPermission'
+              - 'SNS:RemovePermission'
+              - 'SNS:DeleteTopic'
+              - 'SNS:Subscribe'
+              - 'SNS:ListSubscriptionsByTopic'
+              - 'SNS:Publish'
+              - 'SNS:Receive'
+            Resource: !Ref BackupNotification
+            Condition:
+              StringEquals:
+                'AWS:SourceOwner': !Sub ${AWS::AccountId}
+          - Sid: My-statement-id
+            Effect: Allow
+            Principal:
+              Service: backup.amazonaws.com
+            Action: 'SNS:Publish'
+            Resource: !Ref BackupNotification
+
+
+      Topics: 
+        - !Ref BackupNotification
