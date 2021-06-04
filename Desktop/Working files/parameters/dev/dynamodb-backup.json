@@ -1,0 +1,11 @@
+[
+    {
+        "ParameterKey": "EndpointDetails",
+        "ParameterValue": "xyz@gmail.com"
+    },
+    {
+        "ParameterKey": "Cronjob",
+        "ParameterValue": "cron(0 13 ? * * *)"
+    }
+    
+]
